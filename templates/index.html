@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PhishLens | URL Risk Analyzer</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            padding: 40px 18px;
+            font-family: Arial, sans-serif;
+            color: #edf4ff;
+            background: radial-gradient(ellipse at top, #19376b, #080d19 75%);
+        }
+
+        header { text-align: center; margin-bottom: 30px; }
+        h1 { font-size: clamp(36px, 6vw, 54px); margin-bottom: 8px; }
+        h1 span { color: #61d5ff; }
+        header p { color: #b7c8e4; }
+
+        .card {
+            max-width: 720px;
+            margin: 22px auto;
+            padding: 28px;
+            border: 1px solid #344b70;
+            border-radius: 18px;
+            background: #151f35;
+            box-shadow: 0 18px 50px #0004;
+        }
+
+        label { display: block; margin-bottom: 10px; }
+
+        input {
+            width: 100%;
+            padding: 14px;
+            border: 1px solid #506585;
+            border-radius: 9px;
+            color: white;
+            background: #0a1223;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 12px 18px;
+            margin-top: 12px;
+            border: 0;
+            border-radius: 9px;
+            background: #61d5ff;
+            color: #081323;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:disabled { opacity: 0.6; cursor: wait; }
+
+        .demos {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .demos button {
+            background: #293a57;
+            color: #edf4ff;
+            font-size: 13px;
+        }
+
+        .hint { color: #aebfda; line-height: 1.6; font-size: 14px; }
+        #status { min-height: 20px; color: #aee7ff; }
+
+        .score-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin: 22px 0;
+        }
+
+        #score { font-size: 28px; font-weight: bold; white-space: nowrap; }
+
+        .meter {
+            flex: 1;
+            height: 12px;
+            overflow: hidden;
+            border-radius: 20px;
+            background: #34415a;
+        }
+
+        #meterFill {
+            width: 0;
+            height: 100%;
+            background: #4ade80;
+            transition: width 0.35s ease;
+        }
+
+        #results[data-level="Medium"] #meterFill { background: #fbbf24; }
+        #results[data-level="High"] #meterFill { background: #fb7185; }
+
+        #indicators { padding-left: 20px; }
+
+        #indicators li {
+            margin: 12px 0;
+            padding: 14px;
+            border-radius: 9px;
+            background: #0c1528;
+            line-height: 1.6;
+        }
+
+        #indicators p { margin-bottom: 0; color: #b8c7df; }
+        footer { text-align: center; color: #aebfda; font-size: 13px; margin: 32px auto; }
+
+        [hidden] { display: none !important; }
+
+        @media (max-width: 520px) {
+            .card { padding: 20px; }
+            .score-row { align-items: flex-start; flex-direction: column; }
+            .meter { width: 100%; flex: auto; }
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Phish<span>Lens</span> 🔐</h1>
+        <p>Look closer before you click.</p>
+    </header>
+
+    <main>
+        <section class="card">
+            <h2>URL Risk Analyzer</h2>
+            <p>Paste a URL to inspect its warning signs.</p>
+
+            <form id="scanForm">
+                <label for="url">Website URL</label>
+                <input id="url" type="text"
+                       placeholder="https://example.com"
+                       autocomplete="url" required maxlength="2048">
+                <button id="analyzeBtn" type="submit">Analyze URL</button>
+            </form>
+
+            <div class="demos">
+                <button type="button" data-url="https://example.com">
+                    Test low-risk sample
+                </button>
+                <button type="button" data-url="http://192.0.2.10/login/verify">
+                    Test suspicious pattern
+                </button>
+                <button type="button" data-url="http://secure-account-verify.example.com/login">
+                    Test multiple indicators
+                </button>
+            </div>
+
+            <p id="status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section id="results" class="card" hidden aria-live="polite">
+            <p class="hint">ANALYSIS REPORT</p>
+            <h2 id="riskLevel">Risk assessment</h2>
+
+            <div class="score-row">
+                <div id="score">0/100</div>
+                <div class="meter">
+                    <div id="meterFill"></div>
+                </div>
+            </div>
+
+            <p id="hostname"></p>
+            <p id="message" class="hint"></p>
+
+            <h3>Triggered warning signs</h3>
+            <ul id="indicators"></ul>
+        </section>
+        <section class="card" id="historySection">
+    <h2>Recent Scans</h2>
+    <p class="hint">Your last 10 scans on this browser.</p>
+
+    <button type="button" id="clearHistory">
+        Clear History
+    </button>
+
+    <ul id="historyList"></ul>
+</section>
+    </main>
+
+    <footer>
+        PhishLens flags URL warning signs. A low score does not guarantee safety.
+    </footer>
+
+    <script>
+        const form = document.getElementById("scanForm");
+        const input = document.getElementById("url");
+        const button = document.getElementById("analyzeBtn");
+        const status = document.getElementById("status");
+        const results = document.getElementById("results");
+
+        async function analyzeURL(url) {
+            status.textContent = "Analyzing URL patterns...";
+            button.disabled = true;
+            results.hidden = true;
+
+            try {
+                const response = await fetch("/api/analyze", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Analysis failed.");
+                }
+
+                document.getElementById("riskLevel").textContent =
+                    data.level + " risk";
+
+                document.getElementById("score").textContent =
+                    data.score + "/100";
+
+                document.getElementById("meterFill").style.width =
+                    data.score + "%";
+
+                document.getElementById("hostname").textContent =
+                    "Hostname: " + data.hostname;
+
+                document.getElementById("message").textContent =
+                    data.message;
+
+                results.dataset.level = data.level;
+
+                const list = document.getElementById("indicators");
+                list.replaceChildren();
+
+                if (data.indicators.length === 0) {
+                    const item = document.createElement("li");
+                    item.textContent =
+                        "No configured warning signs were triggered. " +
+                        "This does not prove that the website is safe.";
+                    list.appendChild(item);
+                }
+
+                for (const indicator of data.indicators) {
+                    const item = document.createElement("li");
+                    const title = document.createElement("strong");
+                    const explanation = document.createElement("p");
+
+                    title.textContent =
+                        indicator.name + " (+" + indicator.points + " points)";
+
+                    explanation.textContent = indicator.explanation;
+
+                    item.append(title, explanation);
+                    list.appendChild(item);
+                }
+
+                
+            } catch (error) {
+                results.hidden = false;
+                saveScan(data);
+                status.textContent = "Analysis complete.";
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        form.addEventListener("submit", event => {
+            event.preventDefault();
+
+            if (!input.value.trim()) {
+                status.textContent = "Enter a URL first.";
+                return;
+            }
+
+            analyzeURL(input.value.trim());
+        });
+
+        document.querySelectorAll("[data-url]").forEach(demo => {
+            demo.addEventListener("click", () => {
+                input.value = demo.dataset.url;
+                analyzeURL(input.value);
+            });
+        });
+        const historyList = document.getElementById("historyList");
+const clearHistoryButton = document.getElementById("clearHistory");
+
+function getScanHistory() {
+    try {
+        return JSON.parse(
+            sessionStorage.getItem("phishLensHistory") || "[]"
+        );
+    } catch {
+        return [];
+    }
+}
+
+function renderHistory() {
+    const history = getScanHistory();
+    historyList.replaceChildren();
+
+    if (history.length === 0) {
+        const empty = document.createElement("li");
+        empty.textContent = "No scans yet. Analyze a URL to begin.";
+        historyList.appendChild(empty);
+        return;
+    }
+
+    history.forEach(scan => {
+        const item = document.createElement("li");
+        const title = document.createElement("strong");
+        const detail = document.createElement("p");
+
+        title.textContent = `${scan.hostname} — ${scan.score}/100`;
+        detail.textContent = `${scan.level} risk · ${scan.time}`;
+
+        item.append(title, detail);
+        historyList.appendChild(item);
+    });
+}
+
+function saveScan(data) {
+    const history = getScanHistory();
+
+    history.unshift({
+        hostname: data.hostname,
+        score: data.score,
+        level: data.level,
+        time: new Date().toLocaleTimeString()
+    });
+
+    sessionStorage.setItem(
+        "phishLensHistory",
+        JSON.stringify(history.slice(0, 10))
+    );
+
+    renderHistory();
+}
+
+clearHistoryButton.addEventListener("click", () => {
+    sessionStorage.removeItem("phishLensHistory");
+    renderHistory();
+});
+
+renderHistory();
+    </script>
+</body>
+</html>
